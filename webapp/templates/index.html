@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eco — Transcripts</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .subtitle { color: #888; margin-top: 0; margin-bottom: 2rem; font-size: 0.95rem; }
+  form { display: flex; flex-direction: column; gap: 0.75rem; }
+  input[type=url] {
+    font-size: 1rem;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+  }
+  .row { display: flex; gap: 0.75rem; align-items: center; }
+  select {
+    font-size: 0.95rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+  }
+  button {
+    font-size: 1rem;
+    padding: 0.75rem 1.2rem;
+    border-radius: 8px;
+    border: none;
+    background: #2d6a4f;
+    color: white;
+    cursor: pointer;
+  }
+  button:disabled { background: #999; cursor: default; }
+  #status { margin-top: 1.5rem; font-size: 0.95rem; color: #555; min-height: 1.2rem; }
+  #result { margin-top: 1.5rem; display: none; }
+  #transcript {
+    white-space: pre-wrap;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem;
+    max-height: 50vh;
+    overflow-y: auto;
+    font-size: 0.95rem;
+  }
+  #meta { color: #888; font-size: 0.85rem; margin: 0.5rem 0 1rem; }
+  #download {
+    display: inline-block;
+    margin-top: 0.75rem;
+    text-decoration: none;
+    color: #2d6a4f;
+    font-weight: 600;
+  }
+  #error { color: #b3261e; margin-top: 1.5rem; display: none; }
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #ccc;
+    border-top-color: #2d6a4f;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+    margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <h1>Eco</h1>
+  <p class="subtitle">Paste a YouTube or podcast link. Get back the full transcript. Runs locally, no account, nothing sent anywhere paid.</p>
+
+  <form id="form">
+    <input type="url" id="url" placeholder="https://youtube.com/..." required autofocus>
+    <div class="row">
+      <select id="language">
+        <option value="">Auto-detect language</option>
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+      </select>
+      <button type="submit" id="submitBtn">Transcribe</button>
+    </div>
+  </form>
+
+  <div id="status"></div>
+  <div id="error"></div>
+
+  <div id="result">
+    <div id="meta"></div>
+    <div id="transcript"></div>
+    <a id="download" download>Download .txt</a>
+  </div>
+
+<script>
+const form = document.getElementById('form');
+const submitBtn = document.getElementById('submitBtn');
+const statusEl = document.getElementById('status');
+const errorEl = document.getElementById('error');
+const resultEl = document.getElementById('result');
+const transcriptEl = document.getElementById('transcript');
+const metaEl = document.getElementById('meta');
+const downloadEl = document.getElementById('download');
+
+let pollTimer = null;
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = document.getElementById('url').value.trim();
+  const language = document.getElementById('language').value;
+  if (!url) return;
+
+  submitBtn.disabled = true;
+  resultEl.style.display = 'none';
+  errorEl.style.display = 'none';
+  statusEl.innerHTML = '<span class="spinner"></span>Submitting...';
+
+  try {
+    const res = await fetch('/submit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, language})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+    poll(data.job_id);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+function poll(jobId) {
+  pollTimer = setInterval(async () => {
+    const res = await fetch('/status/' + jobId);
+    const data = await res.json();
+
+    if (data.status === 'queued' || data.status === 'running') {
+      statusEl.innerHTML = '<span class="spinner"></span>' + (data.step || 'Working...');
+    } else if (data.status === 'done') {
+      clearInterval(pollTimer);
+      submitBtn.disabled = false;
+      statusEl.textContent = '';
+      showResult(data.result);
+    } else if (data.status === 'error') {
+      clearInterval(pollTimer);
+      submitBtn.disabled = false;
+      statusEl.textContent = '';
+      showError(data.error || 'Transcription failed.');
+    }
+  }, 1500);
+}
+
+function showResult(result) {
+  transcriptEl.textContent = result.text;
+  metaEl.textContent = `${result.title} — ${result.detected_language} — ${Math.round(result.duration_sec)}s audio, transcribed in ${Math.round(result.elapsed_sec)}s`;
+  downloadEl.href = '/download/' + encodeURIComponent(result.filename);
+  downloadEl.setAttribute('download', result.filename);
+  resultEl.style.display = 'block';
+}
+
+function showError(msg) {
+  submitBtn.disabled = false;
+  errorEl.textContent = msg;
+  errorEl.style.display = 'block';
+}
+</script>
+</body>
+</html>

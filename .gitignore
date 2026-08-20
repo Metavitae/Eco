@@ -1,0 +1,38 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.audio_tmp/
+
+# Generated transcripts (data, not code)
+Transcripts/
+
+# --- mobile (Expo/RN) ---
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/expo-env.d.ts
+mobile/.kotlin/
+mobile/*.orig.*
+mobile/*.jks
+mobile/*.p8
+mobile/*.p12
+mobile/*.key
+mobile/*.mobileprovision
+mobile/.metro-health-check*
+mobile/npm-debug.*
+mobile/yarn-debug.*
+mobile/yarn-error.*
+mobile/*.tsbuildinfo
+
+# generated native folders (continuous native generation via expo prebuild)
+mobile/ios
+mobile/android
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
