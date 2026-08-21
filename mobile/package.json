@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "buffer": "^6.0.3",
     "expo": "~57.0.15",
     "expo-asset": "~57.0.13",
     "expo-audio": "~57.0.4",
