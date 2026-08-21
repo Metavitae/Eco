@@ -16,7 +16,6 @@
     "react": "19.2.3",
     "react-native": "0.86.2",
     "react-native-webview": "13.16.1",
-    "react-native-ytdl": "^4.8.3",
     "whisper.rn": "^0.7.2"
   },
   "devDependencies": {
