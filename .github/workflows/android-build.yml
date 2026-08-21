@@ -1,0 +1,58 @@
+name: Android build
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free up runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet \
+            /opt/ghc /opt/hostedtoolcache/CodeQL "$AGENT_TOOLSDIRECTORY" \
+            /usr/local/share/boost /usr/local/graalvm /usr/local/.ghcup \
+            /usr/lib/jvm
+          docker image prune -a -f || true
+          df -h /
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build release APK
+        # "release" build type, but still signed with the auto-generated
+        # debug keystore (android/app/build.gradle already falls back to
+        # signingConfigs.debug for release when no real release credentials
+        # are configured) — this is what actually matters here: a
+        # standalone APK with the JS bundle embedded, matching what EAS's
+        # preview builds produce. assembleDebug does NOT bundle JS by
+        # default and instead expects a live Metro connection, which just
+        # opens expo-dev-client's launcher screen with nothing to load.
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: eco-release-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
