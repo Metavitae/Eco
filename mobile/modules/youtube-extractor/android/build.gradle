@@ -1,31 +1,23 @@
-apply plugin: 'com.android.library'
-apply plugin: 'org.jetbrains.kotlin.android'
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
 
 group = 'expo.modules.youtubeextractor'
 version = '1.0.0'
 
-def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
-apply from: expoModulesCorePlugin
-applyKotlinExpoModulesCorePlugin()
-useCoreDependencies()
-useExpoPublishing()
-
 android {
   namespace "expo.modules.youtubeextractor"
   defaultConfig {
-    minSdkVersion 24
-    // NewPipeExtractor's own network layer relies on java.time APIs that
-    // only ship natively from API 26/33+ - core library desugaring backports
-    // them so it still works down at this project's minSdk 24.
+    versionCode 1
+    versionName "1.0.0"
     multiDexEnabled true
   }
   compileOptions {
+    // NewPipeExtractor's own network layer relies on java.time APIs that
+    // only ship natively from API 26/33+ - core library desugaring backports
+    // them so it still works down at this project's minSdk 24.
     coreLibraryDesugaringEnabled true
-    sourceCompatibility JavaVersion.VERSION_17
-    targetCompatibility JavaVersion.VERSION_17
-  }
-  kotlinOptions {
-    jvmTarget = "17"
   }
 }
 
