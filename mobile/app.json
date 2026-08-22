@@ -30,6 +30,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withCoreLibraryDesugaring",
       "expo-sharing",
       [
         "expo-audio",
