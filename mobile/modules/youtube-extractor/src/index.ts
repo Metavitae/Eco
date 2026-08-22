@@ -4,6 +4,8 @@ export type ResolvedAudioStream = {
   url: string;
   mimeType: string;
   title: string;
+  userAgent: string;
+  referer: string;
 };
 
 type YoutubeExtractorModuleType = {

@@ -72,8 +72,13 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
   const videoId = getYoutubeVideoId(trimmed);
 
   if (videoId) {
-    const { url: streamUrl, mimeType, title } = await resolveAudioStream(videoId);
-    const task = File.createDownloadTask(streamUrl, Paths.cache, {});
+    const { url: streamUrl, mimeType, title, userAgent, referer } = await resolveAudioStream(videoId);
+    // The resolved stream url is only reliable when fetched with the same
+    // User-Agent (and a Referer) that resolved it - a bare request with no
+    // headers has been observed to hang until YouTube's CDN times it out.
+    const task = File.createDownloadTask(streamUrl, Paths.cache, {
+      headers: { 'User-Agent': userAgent, Referer: referer },
+    });
     const downloaded = await task.downloadAsync();
     if (!downloaded) throw new Error('Failed to download audio from YouTube.');
 

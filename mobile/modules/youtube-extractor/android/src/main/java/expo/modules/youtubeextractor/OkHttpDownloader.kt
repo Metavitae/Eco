@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 // Mirrors NewPipe's own DownloaderImpl - NewPipeExtractor needs a real
 // User-Agent and header passthrough or YouTube's InnerTube endpoints refuse
 // the request outright, same failure mode this module exists to get past.
-private const val USER_AGENT =
+const val USER_AGENT =
     "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/120.0.0.0 Mobile Safari/537.36"
 
