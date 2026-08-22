@@ -1,0 +1,7 @@
+{
+  "name": "expo-youtube-extractor",
+  "version": "1.0.0",
+  "description": "Local Expo module: resolves a YouTube video ID to a downloadable audio stream URL via NewPipeExtractor.",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
