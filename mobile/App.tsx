@@ -106,7 +106,10 @@ export default function App() {
     const file = new File(Paths.cache, `${transcriptTitle || 'transcript'}.txt`);
     file.write(transcript);
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(file.uri);
+      // expo-sharing defaults to mimeType "*/*" when none is passed (it does
+      // not infer from the file extension) - explicit text/plain is what
+      // makes Drive/Docs rank as real targets in the share sheet.
+      await Sharing.shareAsync(file.uri, { mimeType: 'text/plain' });
     } else {
       Alert.alert('Sharing not available on this device.');
     }
