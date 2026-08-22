@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
-import { resolveAudioStream } from '../modules/youtube-extractor/src';
+import { resolveAudioStream, downloadAudioStream } from '../modules/youtube-extractor/src';
 
 export type PickedInput = {
   uri: string;
@@ -73,19 +73,20 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
 
   if (videoId) {
     const { url: streamUrl, mimeType, title, userAgent, referer } = await resolveAudioStream(videoId);
-    // The resolved stream url is only reliable when fetched with the same
-    // User-Agent (and a Referer) that resolved it - a bare request with no
-    // headers has been observed to hang until YouTube's CDN times it out.
-    const task = File.createDownloadTask(streamUrl, Paths.cache, {
-      headers: { 'User-Agent': userAgent, Referer: referer },
-    });
-    const downloaded = await task.downloadAsync();
-    if (!downloaded) throw new Error('Failed to download audio from YouTube.');
+    const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_');
+    const destination = new File(Paths.cache, safeTitle);
+
+    // Chunked native download (modules/youtube-extractor), not
+    // expo-file-system's DownloadTask - its hardcoded 60s idle-read timeout
+    // isn't JS-configurable and was observed failing on real 5-7min audio
+    // files (while a 29s clip succeeded). Uses the same User-Agent/Referer
+    // that resolved the stream, for the same reason as before.
+    await downloadAudioStream(streamUrl, { 'User-Agent': userAgent, Referer: referer }, destination.uri);
 
     return {
-      uri: downloaded.uri,
+      uri: destination.uri,
       mimeType,
-      title: title.replace(/\.[^.]+$/, ''),
+      title: safeTitle.replace(/\.[^.]+$/, ''),
     };
   }
 

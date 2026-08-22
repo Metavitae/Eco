@@ -28,6 +28,10 @@ class YoutubeExtractorModule : Module() {
                 "referer" to "https://www.youtube.com/",
             )
         }
+
+        AsyncFunction("downloadAudioStream") { url: String, headers: Map<String, String>, destinationPath: String ->
+            downloadInChunks(url, headers, destinationPath)
+        }
     }
 
     private data class AudioSource(val url: String, val mimeType: String, val extension: String)
