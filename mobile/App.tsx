@@ -27,6 +27,12 @@ import { transcribeWav } from './src/whisper';
 
 type Status = 'idle' | 'working' | 'done' | 'error';
 
+const LANGUAGE_OPTIONS: { label: string; value: string | null }[] = [
+  { label: 'Auto-detect', value: null },
+  { label: 'English', value: 'en' },
+  { label: 'Español', value: 'es' },
+];
+
 export default function App() {
   const converterRef = useRef<WavConverterHandle>(null);
   const mic = useMicRecorder();
@@ -37,6 +43,7 @@ export default function App() {
   const [transcriptTitle, setTranscriptTitle] = useState('');
   const [error, setError] = useState('');
   const [url, setUrl] = useState('');
+  const [language, setLanguage] = useState<string | null>(null);
 
   const runPipeline = async (input: PickedInput) => {
     setStatus('working');
@@ -51,7 +58,7 @@ export default function App() {
       }
 
       setStep('Loading model (first run downloads ~142MB)...');
-      const result = await transcribeWav(wavUri, null, (fraction) => {
+      const result = await transcribeWav(wavUri, language, (fraction) => {
         setStep(`Downloading model... ${Math.round(fraction * 100)}%`);
       });
 
@@ -138,6 +145,25 @@ export default function App() {
           <Text style={styles.buttonText}>{mic.isRecording ? 'Stop recording' : 'Record from mic'}</Text>
         </TouchableOpacity>
 
+        {/* Auto-detect only samples the first ~30s of audio, so a music/
+            silent intro can pick the wrong language and whisper.cpp then
+            outputs an English translation instead of a transcript. Forcing
+            the known spoken language sidesteps that. */}
+        <View style={styles.langRow}>
+          {LANGUAGE_OPTIONS.map((opt) => (
+            <TouchableOpacity
+              key={opt.value ?? 'auto'}
+              style={[styles.langChip, language === opt.value && styles.langChipActive]}
+              onPress={() => setLanguage(opt.value)}
+              disabled={busy}
+            >
+              <Text style={[styles.langChipText, language === opt.value && styles.langChipTextActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         <View style={styles.linkRow}>
           <TextInput
             style={styles.input}
@@ -189,6 +215,17 @@ const styles = StyleSheet.create({
   },
   buttonRecording: { backgroundColor: '#b3261e' },
   buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  langRow: { flexDirection: 'row', gap: 8 },
+  langChip: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  langChipActive: { backgroundColor: '#2d6a4f', borderColor: '#2d6a4f' },
+  langChipText: { color: '#555', fontWeight: '600' },
+  langChipTextActive: { color: '#fff' },
   linkRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   input: {
     flex: 1,

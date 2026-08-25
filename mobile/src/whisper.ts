@@ -54,6 +54,10 @@ export async function transcribeWav(
   const context = await getWhisperContext(onModelProgress);
   const { promise } = context.transcribe(wavUri, {
     language: language ?? 'auto',
+    // Explicit belt-and-suspenders: whisper.cpp's forced-language decoding
+    // (e.g. auto-detect misfiring on a music/silent intro) can otherwise
+    // produce an English translation instead of a same-language transcript.
+    translate: false,
   });
   const { result, language: detectedLanguage } = await promise;
   return { text: result.trim(), language: detectedLanguage };
