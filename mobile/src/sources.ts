@@ -90,14 +90,17 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
     };
   }
 
-  // Direct audio URL (podcast episode link, etc.)
+  // Direct audio URL (podcast episode link, etc.). Podcast episodes can run
+  // well past an hour, the same duration-dependent case that broke YouTube
+  // downloads on expo-file-system's DownloadTask (its hardcoded 60s
+  // idle-read timeout, see downloadAudioStream's own comment) - reuse the
+  // same chunked downloader here instead of hitting that wall again.
   const filenameGuess = trimmed.split('/').pop()?.split('?')[0] || `link-audio-${Date.now()}`;
-  const task = File.createDownloadTask(trimmed, Paths.cache, {});
-  const downloaded = await task.downloadAsync();
-  if (!downloaded) throw new Error('Failed to download audio from this link.');
+  const destination = new File(Paths.cache, filenameGuess);
+  await downloadAudioStream(trimmed, {}, destination.uri);
 
   return {
-    uri: downloaded.uri,
+    uri: destination.uri,
     mimeType: guessMimeType(filenameGuess),
     title: filenameGuess.replace(/\.[^.]+$/, ''),
   };
