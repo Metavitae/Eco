@@ -58,6 +58,14 @@ export async function transcribeWav(
     // (e.g. auto-detect misfiring on a music/silent intro) can otherwise
     // produce an English translation instead of a same-language transcript.
     translate: false,
+    // whisper.cpp's default WHISPER_SAMPLING_GREEDY strategy is prone to
+    // getting stuck re-emitting the same phrase on real-world audio (see
+    // Drive Log 2026-08-25, repetition-loop bug). Its built-in temperature
+    // fallback (entropy/logprob threshold retry) is on by default but often
+    // isn't enough on its own; beam search explores multiple continuations
+    // per step and is the standard, well-documented fix for this failure
+    // mode, matching whisper.cpp's own examples and upstream OpenAI Whisper.
+    beamSize: 5,
   });
   const { result, language: detectedLanguage } = await promise;
   return { text: result.trim(), language: detectedLanguage };
