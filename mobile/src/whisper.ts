@@ -46,27 +46,71 @@ export type TranscribeResult = {
   language: string;
 };
 
-export async function transcribeWav(
+// whisper.cpp's entropy/logprob quality checks are meant to catch a bad
+// decode and trigger the temperature fallback, but a repetition loop is
+// often decoded with high confidence (low entropy, good logprob) and slips
+// past both those checks and beam search (see Drive Log 2026-08-26, second
+// confirmed instance after beamSize alone didn't fix it). Detect the
+// resulting pattern directly: a short run of words repeated enough times to
+// dominate the transcript.
+function hasRepetitionLoop(text: string): boolean {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 30) return false;
+
+  for (let windowSize = 4; windowSize <= 12; windowSize++) {
+    const counts = new Map<string, number>();
+    for (let i = 0; i + windowSize <= words.length; i++) {
+      const gram = words.slice(i, i + windowSize).join(' ').toLowerCase();
+      counts.set(gram, (counts.get(gram) ?? 0) + 1);
+    }
+    for (const count of counts.values()) {
+      if (count >= 5 && (count * windowSize) / words.length > 0.5) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+async function runTranscription(
+  context: WhisperContext,
   wavUri: string,
   language: string | null,
-  onModelProgress?: (fraction: number) => void
+  temperature?: number
 ): Promise<TranscribeResult> {
-  const context = await getWhisperContext(onModelProgress);
   const { promise } = context.transcribe(wavUri, {
     language: language ?? 'auto',
     // Explicit belt-and-suspenders: whisper.cpp's forced-language decoding
     // (e.g. auto-detect misfiring on a music/silent intro) can otherwise
     // produce an English translation instead of a same-language transcript.
     translate: false,
-    // whisper.cpp's default WHISPER_SAMPLING_GREEDY strategy is prone to
-    // getting stuck re-emitting the same phrase on real-world audio (see
-    // Drive Log 2026-08-25, repetition-loop bug). Its built-in temperature
-    // fallback (entropy/logprob threshold retry) is on by default but often
-    // isn't enough on its own; beam search explores multiple continuations
-    // per step and is the standard, well-documented fix for this failure
-    // mode, matching whisper.cpp's own examples and upstream OpenAI Whisper.
+    // Beam search explores multiple continuations per step, which helps
+    // against the greedy strategy's repetition-loop tendency, though not
+    // reliably on its own (see hasRepetitionLoop above).
     beamSize: 5,
+    ...(temperature !== undefined ? { temperature } : {}),
   });
   const { result, language: detectedLanguage } = await promise;
   return { text: result.trim(), language: detectedLanguage };
+}
+
+export async function transcribeWav(
+  wavUri: string,
+  language: string | null,
+  onModelProgress?: (fraction: number) => void
+): Promise<TranscribeResult> {
+  const context = await getWhisperContext(onModelProgress);
+
+  const first = await runTranscription(context, wavUri, language);
+  if (!hasRepetitionLoop(first.text)) return first;
+
+  // Forcing a higher starting temperature (instead of the default 0.0)
+  // is the standard mitigation for a confidently-looping decode: it
+  // breaks the deterministic path that produced the loop.
+  const retry = await runTranscription(context, wavUri, language, 0.8);
+  if (!hasRepetitionLoop(retry.text)) return retry;
+
+  throw new Error(
+    'Transcription got stuck repeating the same phrase, even after retrying. This is a known whisper.cpp failure mode on some audio - try a different source, or try this one again.'
+  );
 }
