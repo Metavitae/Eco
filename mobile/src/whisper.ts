@@ -11,26 +11,60 @@ const MODEL_FILENAME = 'ggml-base.bin';
 
 let contextPromise: Promise<WhisperContext> | null = null;
 
+export type ModelDownloadProgress = { bytesWritten: number; totalBytes: number };
+
+// If the response has no Content-Length (confirmed on WiFi, see Drive Log
+// 2026-08-26: "Model loading slow, no progress feedback" - Android's native
+// downloader reports totalBytes as -1 in that case), a naive `fraction`
+// callback never fires even though the download is genuinely progressing.
+// Report raw byte counts instead so the UI can always show real feedback.
+const STALL_TIMEOUT_MS = 30_000;
+
 export async function ensureModelDownloaded(
-  onProgress?: (fraction: number) => void
+  onProgress?: (progress: ModelDownloadProgress) => void
 ): Promise<string> {
   const modelFile = new File(Paths.document, MODEL_FILENAME);
   if (modelFile.exists && modelFile.size && modelFile.size > 50_000_000) {
     return modelFile.uri;
   }
 
+  let lastBytesWritten = 0;
+  let lastProgressAt = Date.now();
+
   const task = File.createDownloadTask(MODEL_URL, Paths.document, {
-    onProgress: ({ bytesWritten, totalBytes }) => {
-      if (totalBytes > 0) onProgress?.(bytesWritten / totalBytes);
+    onProgress: (progress) => {
+      if (progress.bytesWritten > lastBytesWritten) {
+        lastBytesWritten = progress.bytesWritten;
+        lastProgressAt = Date.now();
+      }
+      onProgress?.(progress);
     },
   });
-  const downloaded = await task.downloadAsync();
-  if (!downloaded) throw new Error('Model download failed.');
-  return downloaded.uri;
+
+  const stallCheck = setInterval(() => {
+    if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+      task.cancel();
+    }
+  }, 5_000);
+
+  try {
+    const downloaded = await task.downloadAsync();
+    if (!downloaded) throw new Error('Model download failed.');
+    return downloaded.uri;
+  } catch (err) {
+    if (Date.now() - lastProgressAt > STALL_TIMEOUT_MS) {
+      throw new Error(
+        `Model download stalled (no progress for ${STALL_TIMEOUT_MS / 1000}s) and was cancelled. Check your connection and try again.`
+      );
+    }
+    throw err;
+  } finally {
+    clearInterval(stallCheck);
+  }
 }
 
 export async function getWhisperContext(
-  onModelProgress?: (fraction: number) => void
+  onModelProgress?: (progress: ModelDownloadProgress) => void
 ): Promise<WhisperContext> {
   if (!contextPromise) {
     contextPromise = (async () => {
@@ -97,7 +131,7 @@ async function runTranscription(
 export async function transcribeWav(
   wavUri: string,
   language: string | null,
-  onModelProgress?: (fraction: number) => void
+  onModelProgress?: (progress: ModelDownloadProgress) => void
 ): Promise<TranscribeResult> {
   const context = await getWhisperContext(onModelProgress);
 

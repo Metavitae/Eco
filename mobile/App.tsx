@@ -58,8 +58,13 @@ export default function App() {
       }
 
       setStep('Loading model (first run downloads ~142MB)...');
-      const result = await transcribeWav(wavUri, language, (fraction) => {
-        setStep(`Downloading model... ${Math.round(fraction * 100)}%`);
+      const result = await transcribeWav(wavUri, language, ({ bytesWritten, totalBytes }) => {
+        const mbWritten = (bytesWritten / 1_000_000).toFixed(1);
+        setStep(
+          totalBytes > 0
+            ? `Downloading model... ${Math.round((bytesWritten / totalBytes) * 100)}%`
+            : `Downloading model... ${mbWritten} MB`
+        );
       });
 
       setTranscriptTitle(input.title);
