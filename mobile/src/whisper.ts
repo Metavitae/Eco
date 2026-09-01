@@ -106,6 +106,65 @@ function hasRepetitionLoop(text: string): boolean {
   return false;
 }
 
+// Common function words in English and Spanish - words that appear in
+// essentially every real sentence in either language. A run of "words" with
+// almost none of these is a strong signal of a bad decode, not real prose.
+const FUNCTION_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'to', 'of',
+  'in', 'on', 'at', 'for', 'and', 'or', 'but', 'with', 'as', 'it', 'this',
+  'that', 'you', 'i', 'we', 'they', 'he', 'she', 'not', 'so', 'if', 'can',
+  'will', 'do', 'does', 'did', 'have', 'has', 'had', 'my', 'your', 'our',
+  'their',
+  'de', 'la', 'el', 'y', 'en', 'que', 'es', 'un', 'una', 'los', 'las', 'se',
+  'por', 'con', 'para', 'no', 'su', 'lo', 'al', 'del',
+]);
+
+// Drive Log 2026-09-01 (4th confirmed repetition-loop instance): the
+// transcript didn't loop from the start - it opened with a burst of
+// hallucinated, non-English/Spanish-sounding proper-noun-like tokens
+// ("Babohar, Kare, Sundar...") before settling into coherent sentences that
+// later degraded into the repetition loop. That earlier hallucination is
+// itself a usable warning sign, not just the eventual loop: real English/
+// Spanish prose almost always has function words woven through it, while a
+// bad decode strung together as comma-separated capitalized non-words does
+// not. Requires a sustained >70% capitalization ratio AND a total absence
+// of function words across a full window - tested against ordinary content
+// that lists several proper nouns/brand names in a row (which still mixes
+// in "and", "the", "at", etc.) without false-triggering.
+function hasSuspiciousHallucination(text: string): boolean {
+  const words = text.split(/\s+/).filter(Boolean);
+  const WINDOW_SIZE = 15;
+  const REQUIRED_STREAK = 1;
+
+  let streak = 0;
+  for (let i = 0; i + WINDOW_SIZE <= words.length; i += WINDOW_SIZE) {
+    const window = words.slice(i, i + WINDOW_SIZE);
+    const alphaWords = window.filter((w) => /[a-zA-ZÀ-ÿ]/.test(w));
+    if (alphaWords.length < WINDOW_SIZE * 0.7) {
+      streak = 0;
+      continue;
+    }
+
+    const capitalizedRatio =
+      alphaWords.filter((w) => /^[A-ZÀ-Ý]/.test(w)).length / alphaWords.length;
+    const hasFunctionWord = alphaWords.some((w) =>
+      FUNCTION_WORDS.has(w.toLowerCase().replace(/[^a-zà-ÿ]/g, ''))
+    );
+
+    if (capitalizedRatio > 0.7 && !hasFunctionWord) {
+      streak += 1;
+      if (streak >= REQUIRED_STREAK) return true;
+    } else {
+      streak = 0;
+    }
+  }
+  return false;
+}
+
+function needsRetry(text: string): boolean {
+  return hasRepetitionLoop(text) || hasSuspiciousHallucination(text);
+}
+
 async function runTranscription(
   context: WhisperContext,
   wavUri: string,
@@ -147,18 +206,22 @@ export async function transcribeWav(
   const context = await getWhisperContext(onModelProgress);
 
   const first = await runTranscription(context, wavUri, language, undefined, onTranscribeProgress);
-  if (!hasRepetitionLoop(first.text)) return first;
+  if (!needsRetry(first.text)) return first;
 
   // A single fixed-temperature retry (previously just 0.8) still failed a
   // third confirmed time (Drive Log 2026-09-01) - a genuinely stuck decode
   // needs more than one shot at breaking its deterministic path. Cascade
   // through several explicit temperatures, same mitigation, more attempts.
+  // Triggered on either a confirmed repetition loop OR an early
+  // hallucination burst (needsRetry) - a 4th instance showed the loop can be
+  // preceded by hallucinated tokens well before the loop itself forms, and
+  // that earlier signal is worth retrying on rather than waiting it out.
   for (const temperature of [0.2, 0.4, 0.6, 0.8, 1.0]) {
     const retry = await runTranscription(context, wavUri, language, temperature, onTranscribeProgress);
-    if (!hasRepetitionLoop(retry.text)) return retry;
+    if (!needsRetry(retry.text)) return retry;
   }
 
   throw new Error(
-    'Transcription got stuck repeating the same phrase, even after retrying at multiple decoding temperatures. This is a known whisper.cpp failure mode on some audio - try a different source, or try this one again.'
+    'Transcription got stuck repeating the same phrase (or produced garbled, non-target-language text), even after retrying at multiple decoding temperatures. This is a known whisper.cpp failure mode on some audio - try a different source, or try this one again.'
   );
 }
