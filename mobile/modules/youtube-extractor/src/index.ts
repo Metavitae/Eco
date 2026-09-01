@@ -8,8 +8,17 @@ export type ResolvedAudioStream = {
   referer: string;
 };
 
+export type ResolvedVideoStream = {
+  url: string;
+  mimeType: string;
+  title: string;
+  userAgent: string;
+  referer: string;
+};
+
 type YoutubeExtractorModuleType = {
   resolveAudioStream(videoId: string): Promise<ResolvedAudioStream>;
+  resolveVideoStream(videoId: string): Promise<ResolvedVideoStream>;
   downloadAudioStream(
     url: string,
     headers: Record<string, string>,
@@ -23,11 +32,21 @@ export function resolveAudioStream(videoId: string): Promise<ResolvedAudioStream
   return YoutubeExtractor.resolveAudioStream(videoId);
 }
 
+// Video (not audio-only) source for the OCR-on-burned-in-captions pipeline -
+// see resolveVideoStream's own comment in YoutubeExtractorModule.kt.
+export function resolveVideoStream(videoId: string): Promise<ResolvedVideoStream> {
+  return YoutubeExtractor.resolveVideoStream(videoId);
+}
+
 // Chunked Range-based download with no overall time ceiling - see
 // ChunkedDownloader.kt for why this replaces expo-file-system's DownloadTask
 // for YouTube audio specifically (its hardcoded 60s idle-read timeout isn't
 // configurable from JS and was observed failing on real 5-7min audio files).
-export function downloadAudioStream(
+// Generic byte downloader under the hood (url/headers/destination only), so
+// also used for the OCR pipeline's video download - kept the original name
+// on the native binding to avoid touching working Kotlin, exported here
+// under a clearer, capability-neutral name.
+export function downloadStream(
   url: string,
   headers: Record<string, string>,
   destinationPath: string,

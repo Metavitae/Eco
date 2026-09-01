@@ -32,9 +32,58 @@ class YoutubeExtractorModule : Module() {
         AsyncFunction("downloadAudioStream") { url: String, headers: Map<String, String>, destinationPath: String ->
             downloadInChunks(url, headers, destinationPath)
         }
+
+        // Video (not muxed-for-audio) source, for the OCR-on-burned-in-captions
+        // pipeline (see Drive Log 2026-08-26/09-01) - that path needs actual
+        // frames, which resolveAudioStream's audio-only/smallest-muxed choice
+        // doesn't reliably provide. Kept separate from resolveAudioStream so
+        // the audio-only pipeline's download size is unaffected when OCR
+        // isn't invoked.
+        AsyncFunction("resolveVideoStream") { videoId: String ->
+            ensureInitialized()
+
+            val info = StreamInfo.getInfo("https://www.youtube.com/watch?v=$videoId")
+            val source = pickVideoSource(info.videoOnlyStreams, info.videoStreams)
+
+            mapOf(
+                "url" to source.url,
+                "mimeType" to source.mimeType,
+                "title" to "${info.name}.${source.extension}",
+                "userAgent" to USER_AGENT,
+                "referer" to "https://www.youtube.com/",
+            )
+        }
     }
 
     private data class AudioSource(val url: String, val mimeType: String, val extension: String)
+    private data class VideoSource(val url: String, val mimeType: String, val extension: String)
+
+    // Picks a video source good enough for OCR-legible frames without
+    // downloading a full-resolution file: closest to 480p, preferring the
+    // audio-less DASH streams (smaller, and OCR never needs the audio track)
+    // over muxed ones.
+    private fun pickVideoSource(
+        videoOnlyStreams: List<VideoStream>,
+        muxedVideoStreams: List<VideoStream>,
+    ): VideoSource {
+        fun resolutionHeight(stream: VideoStream): Int =
+            Regex("""\d+""").find(stream.resolution ?: "")?.value?.toIntOrNull() ?: Int.MAX_VALUE
+
+        fun pick(streams: List<VideoStream>): VideoStream? =
+            streams.filter { !it.content.isNullOrEmpty() }
+                .minByOrNull { kotlin.math.abs(resolutionHeight(it) - 480) }
+
+        val chosen = pick(videoOnlyStreams) ?: pick(muxedVideoStreams)
+            ?: throw IllegalStateException("Could not find a downloadable video stream for this video.")
+
+        val url = chosen.content!!
+        val isWebm = chosen.format?.name?.contains("WEBM", ignoreCase = true) == true
+        return if (isWebm) {
+            VideoSource(url, "video/webm", "webm")
+        } else {
+            VideoSource(url, "video/mp4", "mp4")
+        }
+    }
 
     private fun pickAudioSource(
         audioStreams: List<AudioStream>,

@@ -17,6 +17,7 @@ import { WavConverter, WavConverterHandle } from './src/WavConverter';
 import { pickLocalFile, resolveLinkInput, PickedInput } from './src/sources';
 import { useMicRecorder } from './src/useMicRecorder';
 import { transcribeWav } from './src/whisper';
+import { extractOnScreenCaptions } from './src/ocr';
 
 // Speaker diarization ("who said what") is intentionally NOT implemented
 // yet - no ready React Native library exists for it as of this build
@@ -58,17 +59,36 @@ export default function App() {
       }
 
       setStep('Loading model (first run downloads ~142MB)...');
-      const result = await transcribeWav(wavUri, language, ({ bytesWritten, totalBytes }) => {
-        const mbWritten = (bytesWritten / 1_000_000).toFixed(1);
-        setStep(
-          totalBytes > 0
-            ? `Downloading model... ${Math.round((bytesWritten / totalBytes) * 100)}%`
-            : `Downloading model... ${mbWritten} MB`
-        );
-      });
+      const result = await transcribeWav(
+        wavUri,
+        language,
+        ({ bytesWritten, totalBytes }) => {
+          const mbWritten = (bytesWritten / 1_000_000).toFixed(1);
+          setStep(
+            totalBytes > 0
+              ? `Downloading model... ${Math.round((bytesWritten / totalBytes) * 100)}%`
+              : `Downloading model... ${mbWritten} MB`
+          );
+        },
+        (progress) => setStep(`Transcribing... ${progress}%`)
+      );
+
+      let finalText = result.text;
+      if (input.videoUri) {
+        setStep('Scanning on-screen captions (OCR)...');
+        try {
+          const captions = await extractOnScreenCaptions(input.videoUri);
+          if (captions) {
+            finalText += '\n\n--- On-screen captions (OCR) ---\n' + captions;
+          }
+        } catch {
+          // OCR is a second, parallel source, not the core deliverable - a
+          // failure here must not take down an already-successful transcript.
+        }
+      }
 
       setTranscriptTitle(input.title);
-      setTranscript(result.text);
+      setTranscript(finalText);
       setStatus('done');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

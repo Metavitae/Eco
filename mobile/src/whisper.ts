@@ -110,7 +110,8 @@ async function runTranscription(
   context: WhisperContext,
   wavUri: string,
   language: string | null,
-  temperature?: number
+  temperature?: number,
+  onProgress?: (progress: number) => void
 ): Promise<TranscribeResult> {
   const { promise } = context.transcribe(wavUri, {
     language: language ?? 'auto',
@@ -122,7 +123,16 @@ async function runTranscription(
     // against the greedy strategy's repetition-loop tendency, though not
     // reliably on its own (see hasRepetitionLoop above).
     beamSize: 5,
+    // whisper.cpp's own internal temperature-fallback cascade (temperature
+    // -> += temperatureInc, up to 1.0) is driven by its entropy/logprob/
+    // compression-ratio quality checks - exactly the checks a confidently-
+    // looped decode slips past (see hasRepetitionLoop's comment). Setting it
+    // here is still worth doing (it catches segments that DO trip those
+    // checks), but it's not what fixes the confident-loop case - that needs
+    // our own outer retry across explicit temperatures below.
+    temperatureInc: 0.2,
     ...(temperature !== undefined ? { temperature } : {}),
+    onProgress,
   });
   const { result, language: detectedLanguage } = await promise;
   return { text: result.trim(), language: detectedLanguage };
@@ -131,20 +141,24 @@ async function runTranscription(
 export async function transcribeWav(
   wavUri: string,
   language: string | null,
-  onModelProgress?: (progress: ModelDownloadProgress) => void
+  onModelProgress?: (progress: ModelDownloadProgress) => void,
+  onTranscribeProgress?: (progress: number) => void
 ): Promise<TranscribeResult> {
   const context = await getWhisperContext(onModelProgress);
 
-  const first = await runTranscription(context, wavUri, language);
+  const first = await runTranscription(context, wavUri, language, undefined, onTranscribeProgress);
   if (!hasRepetitionLoop(first.text)) return first;
 
-  // Forcing a higher starting temperature (instead of the default 0.0)
-  // is the standard mitigation for a confidently-looping decode: it
-  // breaks the deterministic path that produced the loop.
-  const retry = await runTranscription(context, wavUri, language, 0.8);
-  if (!hasRepetitionLoop(retry.text)) return retry;
+  // A single fixed-temperature retry (previously just 0.8) still failed a
+  // third confirmed time (Drive Log 2026-09-01) - a genuinely stuck decode
+  // needs more than one shot at breaking its deterministic path. Cascade
+  // through several explicit temperatures, same mitigation, more attempts.
+  for (const temperature of [0.2, 0.4, 0.6, 0.8, 1.0]) {
+    const retry = await runTranscription(context, wavUri, language, temperature, onTranscribeProgress);
+    if (!hasRepetitionLoop(retry.text)) return retry;
+  }
 
   throw new Error(
-    'Transcription got stuck repeating the same phrase, even after retrying. This is a known whisper.cpp failure mode on some audio - try a different source, or try this one again.'
+    'Transcription got stuck repeating the same phrase, even after retrying at multiple decoding temperatures. This is a known whisper.cpp failure mode on some audio - try a different source, or try this one again.'
   );
 }
