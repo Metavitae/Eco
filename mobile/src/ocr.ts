@@ -34,11 +34,22 @@ function isNewCaption(normalized: string, lastNormalized: string): boolean {
   return true;
 }
 
-export async function extractOnScreenCaptions(videoUri: string): Promise<string> {
+// Reported explicitly rather than always returning a possibly-empty string -
+// "empty" was previously indistinguishable from "broke on the very first
+// frame," which is exactly the ambiguity behind the "OCR producing no
+// output, can't tell if it's broken" report (Drive Log 2026-09-01).
+export type OcrOutcome =
+  | { status: 'found'; text: string }
+  | { status: 'no-captions-found' }
+  | { status: 'error'; message: string };
+
+export async function extractOnScreenCaptions(videoUri: string): Promise<OcrOutcome> {
   const kept: string[] = [];
   let lastNormalized = '';
   let time = 0;
   let consecutiveOutOfRange = 0;
+  let framesRead = 0;
+  let lastError: string | undefined;
 
   for (let i = 0; i < MAX_FRAMES; i++) {
     let frameUri: string;
@@ -46,24 +57,36 @@ export async function extractOnScreenCaptions(videoUri: string): Promise<string>
       const thumb = await getThumbnailAsync(videoUri, { time, quality: 0.5 });
       frameUri = thumb.uri;
       consecutiveOutOfRange = 0;
-    } catch {
+      framesRead += 1;
+    } catch (err) {
       // Past the end of the video - two consecutive misses (not just one
       // transient decode hiccup) is the actual stop condition.
+      lastError = err instanceof Error ? err.message : String(err);
       consecutiveOutOfRange += 1;
       if (consecutiveOutOfRange >= 2) break;
       time += FRAME_INTERVAL_MS;
       continue;
     }
 
-    const { text } = await TextRecognition.recognize(frameUri);
-    const normalized = normalize(text);
-    if (isNewCaption(normalized, lastNormalized)) {
-      kept.push(text.trim());
+    try {
+      const { text } = await TextRecognition.recognize(frameUri);
+      const normalized = normalize(text);
+      if (isNewCaption(normalized, lastNormalized)) {
+        kept.push(text.trim());
+      }
+      if (normalized) lastNormalized = normalized;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
     }
-    if (normalized) lastNormalized = normalized;
 
     time += FRAME_INTERVAL_MS;
   }
 
-  return kept.join('\n');
+  if (kept.length > 0) return { status: 'found', text: kept.join('\n') };
+  // Never got a single readable frame - a real failure (bad file, unreadable
+  // codec, native module not linked), not "this video has no captions".
+  if (framesRead === 0) {
+    return { status: 'error', message: lastError ?? 'Could not read any frames from the video file.' };
+  }
+  return { status: 'no-captions-found' };
 }

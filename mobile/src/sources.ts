@@ -1,6 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { resolveAudioStream, resolveVideoStream, downloadStream } from '../modules/youtube-extractor/src';
+import { tryFetchCaptions } from './captions';
 
 export type PickedInput = {
   uri: string;
@@ -10,6 +11,15 @@ export type PickedInput = {
   // file, or a YouTube link) - feeds the OCR-on-burned-in-captions pipeline.
   // A plain audio file/podcast link has nothing to OCR, so this stays unset.
   videoUri?: string;
+  // Set only when a video source was expected but resolving/downloading it
+  // failed - surfaced in the UI instead of silently skipping OCR, per the
+  // "make it obvious, not something to guess at" directive (Drive Log
+  // 2026-09-01, "OCR Not Producing Output").
+  videoUnavailableReason?: string;
+  // Set when a usable existing caption track was found (see captions.ts) -
+  // the caller skips the audio download/whisper pipeline entirely and uses
+  // this text directly (Drive Log 2026-09-01/02, captions fast path).
+  precomputedTranscript?: string;
 };
 
 export async function pickLocalFile(): Promise<PickedInput | null> {
@@ -73,11 +83,26 @@ function getYoutubeVideoId(link: string): string | null {
  *   link) are NOT resolved - that needs XML parsing to find the latest
  *   episode's enclosure, which is a separate feature, not attempted here.
  */
-export async function resolveLinkInput(url: string): Promise<PickedInput> {
+export async function resolveLinkInput(url: string, languageHint: string | null = null): Promise<PickedInput> {
   const trimmed = url.trim();
   const videoId = getYoutubeVideoId(trimmed);
 
   if (videoId) {
+    // Fast path: skip the audio download and on-device whisper transcription
+    // entirely when a usable existing caption track is available (Drive Log
+    // 2026-09-01/02). Falls through to the full audio pipeline below on any
+    // failure or when captions aren't usable - never blocks the real
+    // deliverable on this being available.
+    const captions = await tryFetchCaptions(videoId, languageHint);
+    if (captions.status === 'found') {
+      return {
+        uri: '',
+        mimeType: 'text/plain',
+        title: captions.title.replace(/[/\\?%*:|"<>]/g, '_'),
+        precomputedTranscript: captions.text,
+      };
+    }
+
     const { url: streamUrl, mimeType, title, userAgent, referer } = await resolveAudioStream(videoId);
     const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_');
     const destination = new File(Paths.cache, safeTitle);
@@ -92,8 +117,11 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
     // Best-effort video download for OCR - a second, parallel capability,
     // not the core deliverable (see ocr.ts). A failure here (resolution
     // unavailable, extra download fails) must not break the actual
-    // transcript, which the audio download above already secured.
+    // transcript, which the audio download above already secured - but the
+    // reason is kept, not discarded, so the UI can say what happened instead
+    // of OCR just silently producing nothing.
     let videoUri: string | undefined;
+    let videoUnavailableReason: string | undefined;
     try {
       const video = await resolveVideoStream(videoId);
       const videoSafeTitle = video.title.replace(/[/\\?%*:|"<>]/g, '_');
@@ -104,8 +132,8 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
         videoDestination.uri
       );
       videoUri = videoDestination.uri;
-    } catch {
-      videoUri = undefined;
+    } catch (err) {
+      videoUnavailableReason = err instanceof Error ? err.message : String(err);
     }
 
     return {
@@ -113,6 +141,7 @@ export async function resolveLinkInput(url: string): Promise<PickedInput> {
       mimeType,
       title: safeTitle.replace(/\.[^.]+$/, ''),
       videoUri,
+      videoUnavailableReason,
     };
   }
 

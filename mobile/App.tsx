@@ -51,6 +51,15 @@ export default function App() {
     setError('');
     setTranscript('');
     try {
+      // Captions fast path (sources.ts/captions.ts) - a usable existing
+      // caption track skips audio download and whisper entirely.
+      if (input.precomputedTranscript !== undefined) {
+        setTranscriptTitle(input.title);
+        setTranscript(input.precomputedTranscript);
+        setStatus('done');
+        return;
+      }
+
       let wavUri = input.uri;
       if (input.mimeType !== 'audio/wav') {
         setStep('Converting audio...');
@@ -74,17 +83,32 @@ export default function App() {
       );
 
       let finalText = result.text;
+      // Every branch below appends something - OCR previously could run and
+      // silently produce nothing with zero visible trace, indistinguishable
+      // from "broken" (Drive Log 2026-09-01, "OCR Not Producing Output").
+      // Now the app always states what actually happened, video source or
+      // not, so a real failure and "this video just has no captions" are no
+      // longer the same blank result.
       if (input.videoUri) {
         setStep('Scanning on-screen captions (OCR)...');
         try {
-          const captions = await extractOnScreenCaptions(input.videoUri);
-          if (captions) {
-            finalText += '\n\n--- On-screen captions (OCR) ---\n' + captions;
+          const outcome = await extractOnScreenCaptions(input.videoUri);
+          if (outcome.status === 'found') {
+            finalText += '\n\n--- On-screen captions (OCR) ---\n' + outcome.text;
+          } else if (outcome.status === 'no-captions-found') {
+            finalText += '\n\n--- On-screen captions (OCR) ---\nNo on-screen text detected in this video.';
+          } else {
+            finalText += `\n\n--- On-screen captions (OCR) ---\nOCR failed: ${outcome.message}`;
           }
-        } catch {
+        } catch (err) {
           // OCR is a second, parallel source, not the core deliverable - a
-          // failure here must not take down an already-successful transcript.
+          // failure here must not take down an already-successful transcript,
+          // but it still gets reported instead of vanishing.
+          const message = err instanceof Error ? err.message : String(err);
+          finalText += `\n\n--- On-screen captions (OCR) ---\nOCR failed: ${message}`;
         }
+      } else if (input.videoUnavailableReason) {
+        finalText += `\n\n--- On-screen captions (OCR) ---\nCould not get video for OCR: ${input.videoUnavailableReason}`;
       }
 
       setTranscriptTitle(input.title);
@@ -126,7 +150,7 @@ export default function App() {
     setStep('Fetching link...');
     setError('');
     try {
-      const picked = await resolveLinkInput(url.trim());
+      const picked = await resolveLinkInput(url.trim(), language);
       await runPipeline(picked);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -154,9 +178,6 @@ export default function App() {
       <WavConverter ref={converterRef} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.h1}>Eco</Text>
-        <Text style={styles.subtitle}>
-          Transcribe a file, a recording, or a link. Fully on-device, nothing sent anywhere paid.
-        </Text>
 
         <TouchableOpacity style={styles.button} onPress={handlePickFile} disabled={busy}>
           <Text style={styles.buttonText}>Pick audio or video file</Text>
@@ -230,8 +251,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   scroll: { padding: 20, gap: 12 },
-  h1: { fontSize: 28, fontWeight: '700' },
-  subtitle: { color: '#666', marginBottom: 12 },
+  h1: { fontSize: 28, fontWeight: '700', marginBottom: 12 },
   button: {
     backgroundColor: '#2d6a4f',
     paddingVertical: 14,
