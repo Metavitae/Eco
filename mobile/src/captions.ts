@@ -38,6 +38,26 @@ function stripTags(text: string): string {
   return text.replace(/<[^>]*>/g, '');
 }
 
+// YouTube's caption data is HTML-escaped - decode it back to real characters
+// (Drive Log 2026-09-01: "you&#39;re" was showing up literally instead of
+// "you're"). Handles named entities, decimal (&#39;), and hex (&#x27;)
+// numeric entities generically, not just the apostrophe case that was seen.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: ' ',
+};
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&([a-zA-Z]+);/g, (match, name) => NAMED_ENTITIES[name.toLowerCase()] ?? match);
+}
+
 function parseWebVtt(content: string): string[] {
   const blocks = content.replace(/\r/g, '').split(/\n\n+/);
   const cues: string[] = [];
@@ -129,10 +149,10 @@ export async function tryFetchCaptions(
     await downloadStream(track.url, {}, destination.uri);
     const content = await destination.text();
     const cues = track.format.toLowerCase().includes('ttml') ? parseTtml(content) : parseWebVtt(content);
-    const text = mergeCues(cues);
+    const text = decodeHtmlEntities(mergeCues(cues)).trim();
 
-    if (text.trim().length < MIN_USABLE_LENGTH) return { status: 'unavailable' };
-    return { status: 'found', text: text.trim(), title };
+    if (text.length < MIN_USABLE_LENGTH) return { status: 'unavailable' };
+    return { status: 'found', text, title: decodeHtmlEntities(title) };
   } catch {
     return { status: 'unavailable' };
   }
