@@ -13,7 +13,7 @@
     "android": {
       "package": "com.metavitae.eco",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#2F6B50",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -48,7 +48,8 @@
             ]
           }
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "eas": {
