@@ -49,7 +49,14 @@
           }
         }
       ],
-      "expo-font"
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/outfit/600SemiBold/Outfit_600SemiBold.ttf"
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {

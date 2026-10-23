@@ -1,6 +1,5 @@
 import React, { useRef, useState } from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,7 +10,7 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import { useFonts, Outfit_600SemiBold } from '@expo-google-fonts/outfit';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 
@@ -36,10 +35,19 @@ const LANGUAGE_OPTIONS: { label: string; value: string | null }[] = [
   { label: 'Español', value: 'es' },
 ];
 
+// Android draws apps edge to edge, under the status bar and the navigation
+// buttons; the provider supplies each device's real inset sizes.
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <EcoScreen />
+    </SafeAreaProvider>
+  );
+}
+
+function EcoScreen() {
   const converterRef = useRef<WavConverterHandle>(null);
   const mic = useMicRecorder();
-  const [fontsLoaded] = useFonts({ Outfit_600SemiBold });
 
   const [status, setStatus] = useState<Status>('idle');
   const [step, setStep] = useState('');
@@ -177,12 +185,12 @@ export default function App() {
   const busy = status === 'working';
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
       <WavConverter ref={converterRef} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
           <Image source={require('./assets/logo-mark.png')} style={styles.logo} />
-          <Text style={[styles.h1, fontsLoaded && styles.h1Outfit]}>Eco</Text>
+          <Text style={styles.h1}>Eco</Text>
         </View>
 
         <TouchableOpacity style={styles.button} onPress={handlePickFile} disabled={busy}>
@@ -256,11 +264,12 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  scroll: { padding: 20, gap: 12 },
+  scroll: { padding: 20, paddingBottom: 32, gap: 12 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   logo: { width: 36, height: 36 },
-  h1: { fontSize: 28, fontWeight: '700', color: '#1B4332', letterSpacing: -0.5 },
-  h1Outfit: { fontFamily: 'Outfit_600SemiBold', fontWeight: undefined },
+  // Outfit is embedded at build time by the expo-font plugin (app.json), so
+  // the family name is the font file's name.
+  h1: { fontSize: 30, fontFamily: 'Outfit_600SemiBold', color: '#1B4332', letterSpacing: -0.5 },
   button: {
     backgroundColor: '#2d6a4f',
     paddingVertical: 14,
